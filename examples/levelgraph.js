@@ -1,9 +1,10 @@
 'use strict'
 
-const { BindingBase, HashMapDataset, Graph, PlanBuilder } = require('sparql-engine')
+const { BindingBase, HashMapDataset, Graph, PlanBuilder } = require('../dist/api')
 const level = require('level')
 const levelgraph = require('levelgraph')
 const { Transform } = require('stream')
+const { Observable } = require('rxjs')
 
 // An utility class used to convert LevelGraph bindings
 // into a format undestood by sparql-engine
@@ -41,7 +42,10 @@ class LevelRDFGraph extends Graph {
       return t
     })
     // Transform the Stream returned by LevelGraph into an Stream of Bindings
-    return new FormatterStream(this._db.searchStream(bgp))
+    const payloadStream = this._db
+    .searchStream(bgp)
+    .pipe(new FormatterStream())
+  return fromNodeStream(payloadStream)
   }
 }
 
@@ -76,3 +80,35 @@ db.put([triple1, triple2], () => {
     console.log('Query evaluation complete!')
   })
 })
+
+function fromNodeStream(stream) {
+  // Adapted from https://github.com/Reactive-Extensions/rx-node/blob/87589c07be626c32c842bdafa782fca5924e749c/index.js#L52
+
+  stream.pause()
+
+  return new Observable(observer => {
+    function dataHandler(data) {
+      observer.next(data)
+    }
+
+    function errorHandler(err) {
+      observer.error(err)
+    }
+
+    function endHandler() {
+      observer.complete()
+    }
+
+    stream.addListener('data', dataHandler)
+    stream.addListener('error', errorHandler)
+    stream.addListener('end', endHandler)
+
+    stream.resume()
+
+    return () => {
+      stream.removeListener('data', dataHandler)
+      stream.removeListener('error', errorHandler)
+      stream.removeListener('end', endHandler)
+    }
+  })
+}
