@@ -26,11 +26,12 @@ SOFTWARE.
 
 import SPARQL_AGGREGATES from './sparql-aggregates'
 import SPARQL_OPERATIONS from './sparql-operations'
-import { RDFTerm } from '../../rdf-terms'
+import { terms } from '../../rdf-terms'
 import { rdf } from '../../utils'
 import { isArray, isString } from 'lodash'
 import { Algebra } from 'sparqljs'
 import { Bindings } from '../../rdf/bindings'
+import { CustomFunctions } from '../../engine/plan-builder'
 
 /**
  * An input SPARQL expression to be compiled
@@ -40,9 +41,9 @@ export type InputExpression = Algebra.Expression | string | string[]
 /**
  * A SPARQL expression compiled as a function
  */
-export type CompiledExpression = (bindings: Bindings) => RDFTerm | RDFTerm[] | null
+export type CompiledExpression = (bindings: Bindings) => terms.RDFTerm | terms.RDFTerm[] | null
 
-function bindArgument (variable: string): (bindings: Bindings) => RDFTerm | null {
+function bindArgument (variable: string): (bindings: Bindings) => terms.RDFTerm | null {
   return (bindings: Bindings) => {
     if (bindings.has(variable)) {
       return rdf.parseTerm(bindings.get(variable)!)
@@ -62,8 +63,8 @@ export default class SPARQLExpression {
    * Constructor
    * @param expression - SPARQL expression
    */
-  constructor (expression: InputExpression) {
-    this._expression = this._compileExpression(expression)
+  constructor (expression: InputExpression, customFunctions?: CustomFunctions) {
+    this._expression = this._compileExpression(expression, customFunctions)
   }
 
   /**
@@ -71,7 +72,7 @@ export default class SPARQLExpression {
    * @param  expression - SPARQL expression
    * @return Compiled SPARQL expression
    */
-  private _compileExpression (expression: InputExpression): CompiledExpression {
+  private _compileExpression (expression: InputExpression, customFunctions?: CustomFunctions): CompiledExpression {
     // simple case: the expression is a SPARQL variable or a RDF term
     if (isString(expression)) {
       if (rdf.isVariable(expression)) {
@@ -86,7 +87,7 @@ export default class SPARQLExpression {
     } else if (expression.type === 'operation') {
       const opExpression = <Algebra.SPARQLExpression> expression
       // operation case: recursively compile each argument, then evaluate the expression
-      const args = opExpression.args.map(arg => this._compileExpression(arg))
+      const args = opExpression.args.map(arg => this._compileExpression(arg, customFunctions))
       if (!(opExpression.operator in SPARQL_OPERATIONS)) {
         throw new Error(`Unsupported SPARQL operation: ${opExpression.operator}`)
       }
@@ -107,6 +108,28 @@ export default class SPARQLExpression {
         }
         return bindings
       }
+    } else if (expression.type === 'functionCall') {
+      const functionExpression = <Algebra.FunctionCallExpression> expression
+      const customFunction =
+        (customFunctions && customFunctions[functionExpression.function])
+          ? customFunctions[functionExpression.function]
+          : null
+
+      if (!customFunction) {
+        throw new Error(`Custom function could not be found: ${functionExpression.function}`)
+      }
+      return (bindings: Bindings) => {
+        try{
+          const args = functionExpression.args.map(args => this._compileExpression(args, customFunctions))
+          return customFunction(...args.map(arg => arg(bindings)))
+        } catch (e) {
+          // In section 10 of the sparql docs (https://www.w3.org/TR/sparql11-query/#assignment) it states:
+          // "If the evaluation of the expression produces an error, the variable remains unbound for that solution but the query evaluation continues."
+          // unfortunately this means the error is silent unless some logging is introduced here,
+          // which is probably not desired unless a logging framework is introduced
+          return null
+        }
+      }
     }
     throw new Error(`Unsupported SPARQL operation type found: ${expression.type}`)
   }
@@ -116,7 +139,7 @@ export default class SPARQLExpression {
    * @param  bindings - Set of mappings
    * @return Results of the evaluation
    */
-  evaluate (bindings: Bindings): RDFTerm | RDFTerm[] | null {
+  evaluate (bindings: Bindings): terms.RDFTerm | terms.RDFTerm[] | null {
     return this._expression(bindings)
   }
 }
