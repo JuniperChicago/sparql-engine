@@ -165,6 +165,18 @@ declare module 'sparqljs' {
     }
 
     /**
+     * A SPARQL LOAD node
+     */
+    export interface UpdateLoadNode extends PlanNode {
+      /**
+       * Destination's graph of the LOAD operation
+       */
+      destination?: string;
+      source: string;
+      silent: boolean;
+    }
+
+    /**
      * A SPARQL CLEAR node
      */
     export interface UpdateClearNode extends PlanNode {
