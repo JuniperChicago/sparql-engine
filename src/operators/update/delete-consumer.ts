@@ -28,7 +28,7 @@ import { Consumer } from './consumer'
 import Graph from '../../rdf/graph'
 import { Observable } from 'rxjs'
 import { Algebra } from 'sparqljs'
-
+import ExecutionContext from '../../engine/context/execution-context'
 /**
  * A DeleteConsumer evaluates a SPARQL DELETE clause
  * @extends Consumer
@@ -41,10 +41,10 @@ export default class DeleteConsumer extends Consumer {
    * Constructor
    * @param source - Source iterator
    * @param graph - Input RDF Graph
-   * @param options - Execution options
+   * @param context - Execution context
    */
-  constructor (source: Observable<Algebra.TripleObject>, graph: Graph, options: Object) {
-    super(source, options)
+  constructor (source: Observable<Algebra.TripleObject>, graph: Graph, context: ExecutionContext) {
+    super(source, context)
     this._graph = graph
   }
 

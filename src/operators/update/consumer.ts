@@ -27,6 +27,7 @@ SOFTWARE.
 import { Observable } from 'rxjs'
 import { Writable } from 'stream'
 import { Algebra } from 'sparqljs'
+import ExecutionContext from '../../engine/context/execution-context'
 
 /**
  * Something whose execution can be resolved as a Promise
@@ -66,17 +67,17 @@ export class ErrorConsumable implements Consumable {
  */
 export abstract class Consumer extends Writable implements Consumable {
   private readonly _source: Observable<Algebra.TripleObject>
-  private readonly _options: Object
+  private readonly _context: Object
 
   /**
    * Constructor
    * @param source - Source iterator
-   * @param options - Execution options
+   * @param context - Execution context
    */
-  constructor (source: Observable<Algebra.TripleObject>, options: Object) {
+  constructor (source: Observable<Algebra.TripleObject>, context: ExecutionContext) {
     super({ objectMode: true })
     this._source = source
-    this._options = options
+    this._context = context
   }
 
   execute (): Promise<void> {
