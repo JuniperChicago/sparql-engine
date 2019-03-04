@@ -27,6 +27,7 @@ SOFTWARE.
 import { Algebra } from 'sparqljs'
 import Dataset from '../../rdf/dataset'
 import { partition } from 'lodash'
+import ExecutionContext from '../context/execution-context';
 
 /**
  * Create a triple pattern that matches all RDF triples in a graph
@@ -114,12 +115,13 @@ function buildWhereClause (source: Algebra.UpdateGraphTarget, dataset: Dataset, 
  * @param  dataset - related RDF dataset
  * @return Rewritten ADD query
  */
-export function rewriteAdd (addQuery: Algebra.UpdateCopyMoveNode, dataset: Dataset): Algebra.UpdateQueryNode {
+export function rewriteAdd (addQuery: Algebra.UpdateCopyMoveNode, dataset: Dataset, context: ExecutionContext): Algebra.UpdateQueryNode {
+  const silent = context.getProperty('dynamic-graph') || addQuery.silent
   return {
     updateType: 'insertdelete',
     silent: addQuery.silent,
-    insert: [buildGroupClause(addQuery.destination, dataset, addQuery.silent)],
-    where: [buildWhereClause(addQuery.source, dataset, addQuery.silent)]
+    insert: [buildGroupClause(addQuery.destination, dataset, silent)],
+    where: [buildWhereClause(addQuery.source, dataset, silent)]
   }
 }
 
@@ -130,12 +132,12 @@ export function rewriteAdd (addQuery: Algebra.UpdateCopyMoveNode, dataset: Datas
  * @param dataset - related RDF dataset
  * @return Rewritten COPY query, i.e., a sequence [CLEAR query, INSERT query]
  */
-export function rewriteCopy (copyQuery: Algebra.UpdateCopyMoveNode, dataset: Dataset): [Algebra.UpdateClearNode, Algebra.UpdateQueryNode] {
+export function rewriteCopy (copyQuery: Algebra.UpdateCopyMoveNode, dataset: Dataset, context: ExecutionContext): [Algebra.UpdateClearNode, Algebra.UpdateQueryNode] {
   // first, build a CLEAR query to empty the destination
   const clear: Algebra.UpdateClearNode = {
     type: 'clear',
     silent: copyQuery.silent,
-    graph: {type: 'graph'}
+    graph: { type: 'graph' }
   }
   if (copyQuery.destination.default) {
     clear.graph.default = true
@@ -144,7 +146,7 @@ export function rewriteCopy (copyQuery: Algebra.UpdateCopyMoveNode, dataset: Dat
     clear.graph.name = copyQuery.destination.name
   }
   // then, build an INSERT query to copy the data
-  const update = rewriteAdd(copyQuery, dataset)
+  const update = rewriteAdd(copyQuery, dataset, context)
   return [clear, update]
 }
 
@@ -155,22 +157,22 @@ export function rewriteCopy (copyQuery: Algebra.UpdateCopyMoveNode, dataset: Dat
  * @param dataset - related RDF dataset
  * @return Rewritten MOVE query, i.e., a sequence [CLEAR query, INSERT query, CLEAR query]
  */
-export function rewriteMove (moveQuery: Algebra.UpdateCopyMoveNode, dataset: Dataset): [Algebra.UpdateClearNode, Algebra.UpdateQueryNode, Algebra.UpdateClearNode] {
+export function rewriteMove (moveQuery: Algebra.UpdateCopyMoveNode, dataset: Dataset, context: ExecutionContext): [Algebra.UpdateClearNode, Algebra.UpdateQueryNode, Algebra.UpdateClearNode] {
   // first, build a classic COPY query
-  const [ clear_before, update ] = rewriteCopy(moveQuery, dataset)
+  const [ clearBefore, update ] = rewriteCopy(moveQuery, dataset, context)
   // then, append a CLEAR query to clear the source graph
-  const clear_after: Algebra.UpdateClearNode = {
+  const clearAfter: Algebra.UpdateClearNode = {
     type: 'clear',
     silent: moveQuery.silent,
-    graph: {type: 'graph'}
+    graph: { type: 'graph' }
   }
   if (moveQuery.source.default) {
-    clear_after.graph.default = true
+    clearAfter.graph.default = true
   } else {
-    clear_after.graph.type = moveQuery.source.type
-    clear_after.graph.name = moveQuery.source.name
+    clearAfter.graph.type = moveQuery.source.type
+    clearAfter.graph.name = moveQuery.source.name
   }
-  return [clear_before, update, clear_after]
+  return [clearBefore, update, clearAfter]
 }
 
 /**
@@ -200,15 +202,15 @@ export function extractPropertyPaths (bgp: Algebra.BGPNode): [Algebra.TripleObje
           // non-property paths triples are fed to the BGP executor
           if (typeof(pred) === 'string') {
             classicTriples.push({
-              subject: (seqIndex == 0) ? triple.subject : joinVar,
+              subject: (seqIndex === 0) ? triple.subject : joinVar,
               predicate: pred,
-              object: (seqIndex == t.predicate.items.length - 1) ? triple.object : nextJoinVar
+              object: (seqIndex === t.predicate.items.length - 1) ? triple.object : nextJoinVar
             })
           } else {
             paths.push({
-              subject: (seqIndex == 0) ? triple.subject : joinVar,
+              subject: (seqIndex === 0) ? triple.subject : joinVar,
               predicate: pred,
-              object: (seqIndex == t.predicate.items.length - 1) ? triple.object : nextJoinVar
+              object: (seqIndex === t.predicate.items.length - 1) ? triple.object : nextJoinVar
             })
           }
         })

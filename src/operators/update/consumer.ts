@@ -60,6 +60,15 @@ export class ErrorConsumable implements Consumable {
 }
 
 /**
+ * A consumable that always resolves, skipping operations
+ */
+export class NoopConsumable implements Consumable {
+  execute (): Promise<void> {
+    return Promise.resolve()
+  }
+}
+
+/**
  * A Consumer consumes bindings from an iterator to evaluate a SPARQL UPDATE query
  * @abstract
  * @extends Writable

@@ -9,6 +9,7 @@
     "build": "tsc",
     "pretest": "npm run build",
     "test": "mocha tests/**/*-test.js",
+    "test-nobuild": "mocha tests/**/*-test.js",
     "report": "nyc --reporter=html --reporter=text mocha tests/**/*-test.js",
     "codecov": "nyc report --reporter=text-lcov > coverage.lcov",
     "doc": "typedoc --mode file --out docs/"

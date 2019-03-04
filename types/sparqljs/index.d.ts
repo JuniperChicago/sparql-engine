@@ -165,11 +165,11 @@ declare module 'sparqljs' {
     }
 
     /**
-     * A SPARQL LOAD node
+     * SPARQL Update LOAD
      */
     export interface UpdateLoadNode extends PlanNode {
       /**
-       * Destination's graph of the LOAD operation
+       * Source and Destination graph of the Update LOAD
        */
       destination?: string;
       source: string;

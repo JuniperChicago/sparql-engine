@@ -41,13 +41,13 @@ export default abstract class ServiceExecutor extends Executor {
    * Build an iterator to evaluate a SERVICE clause
    * @param  source  - Source iterator
    * @param  node    - Service clause
-   * @param  options - Execution options
+   * @param  context - Execution options
    * @return An iterator used to evaluate a SERVICE clause
    */
   buildIterator (source: Observable<Bindings>, node: Algebra.ServiceNode, context: ExecutionContext): Observable<Bindings> {
     let subquery: Algebra.RootNode
     if (node.patterns[0].type === 'query') {
-      subquery = (<Algebra.RootNode> node.patterns[0])
+      subquery = (node.patterns[0] as Algebra.RootNode)
     } else {
       subquery = {
         prefixes: context.getProperty('prefixes'),
