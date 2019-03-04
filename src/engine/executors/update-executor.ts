@@ -98,7 +98,7 @@ export default class UpdateExecutor extends Executor {
             ])
           case 'load':
             // case defined here so extending the class does not require modifying switch code in subclass, only handler.
-            return this._handleLoadInsert(queries, context)
+            return this._handleLoadInsert(update as Algebra.UpdateLoadNode, context)
           default:
             return new ErrorConsumable(`Unsupported SPARQL UPDATE query: ${update.type}`)
         }
@@ -207,8 +207,6 @@ export default class UpdateExecutor extends Executor {
     } else if (query.graph.named) {
       graph = this._dataset.getUnionGraph(iris, false)
     } else if (!this._dataset.hasNamedGraph(query.graph.name!)) {
-      // skip clear operation since target graph does not exist but may be created automatically
-      // instead return error in function that attempts to read or create the new named graph
       return new NoopConsumable() as ClearConsumer
     } else {
       graph = this._dataset.getNamedGraph(query.graph.name!)
@@ -217,7 +215,7 @@ export default class UpdateExecutor extends Executor {
   }
 
   _handleLoadInsert (update: Algebra.UpdateLoadNode, context: ExecutionContext): InsertConsumer | ErrorConsumable {
-    // extend with custom code, for now either silent noop or error
+    // Define in SubClass
     return (update.silent) ? new NoopConsumable() as InsertConsumer : new ErrorConsumable(`Unsupported SPARQL UPDATE query: ${update.type}`)
   }
 }

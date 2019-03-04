@@ -24,9 +24,12 @@ SOFTWARE.
 
 'use strict'
 
-const { Parser, Store } = require('n3')
+const { Parser, Store, StreamParser } = require('n3')
+const request = require('request')
 const fs = require('fs')
-const { HashMapDataset, Graph, PlanBuilder } = require('../dist/api.js')
+const { Observable } = require('rxjs')
+const { shareReplay } = require('rxjs/operators')
+const { HashMapDataset, Graph, PlanBuilder, UpdateExecutor, ExecutionContext, InsertConsumer } = require('../dist/api.js')
 const { pick } = require('lodash')
 
 function getGraph(filePath = null) {
@@ -37,20 +40,31 @@ function getGraph(filePath = null) {
   return graph
 }
 
-function formatTriplePattern(triple) {
-  let subject = null
-  let predicate = null
-  let object = null
-  if (!triple.subject.startsWith('?')) {
-    subject = triple.subject
+// function formatTriplePattern(triple) {
+//   let subject = null
+//   let predicate = null
+//   let object = null
+//   if (!triple.subject.startsWith('?')) {
+//     subject = triple.subject
+//   }
+//   if (!triple.predicate.startsWith('?')) {
+//     predicate = triple.predicate
+//   }
+//   if (!triple.object.startsWith('?')) {
+//     object = triple.object
+//   }
+//   return { subject, predicate, object }
+// }
+
+function formatTriplePattern(triple = {}) {
+  const varVal = null
+  const { subject, predicate, object, graph } = triple
+  return {
+    subject: !!subject && subject.startsWith('?') ? varVal : subject,
+    predicate: !!predicate && predicate.startsWith('?') ? varVal : predicate,
+    object: !!object && object.startsWith('?') ? varVal : object,
+    graph: !!graph && graph.startsWith('?') ? varVal : graph
   }
-  if (!triple.predicate.startsWith('?')) {
-    predicate = triple.predicate
-  }
-  if (!triple.object.startsWith('?')) {
-    object = triple.object
-  }
-  return { subject, predicate, object }
 }
 
 class N3Graph extends Graph {
@@ -129,7 +143,131 @@ class TestEngine {
   }
 }
 
+
+/**
+ * Update Executor extended to include handler for LOAD
+ */
+class UpdateExecutorPlusLoad extends UpdateExecutor {
+
+  constructor(dataset){
+      super(dataset)
+  }
+  _handleLoadInsert (update, context) {
+    let graph = null
+    const { source, destination, silent } = update
+
+    const externalGraphSource = context.getProperty('requestHandler')
+    const dynamicGraph = context.getProperty('dynamic-graph')
+
+    // a SILENT modifier prevents errors when using an unknown graph
+    if ((!this._dataset.hasNamedGraph(destination) && !dynamicGraph) && !silent) {
+      throw new Error(`Unknown Source Graph in LOAD query ${destination}`)
+    }
+
+    let loadSource = externalGraphSource(source).pipe(shareReplay(5))
+    graph = (destination) ? this._dataset.getNamedGraph(destination) : this._dataset.getDefaultGraph()
+
+    return new InsertConsumer(loadSource, graph, context)
+      // return new ErrorConsumable(`Unsupported SPARQL UPDATE query from SubClass: ${update.type}`)
+    }
+}
+/**
+ * Test engine with load handler defined
+ */
+class TestEnginePlusLoad {
+  constructor(graph, defaultGraphIRI = null, customOperations = {}) {
+    this._graph = graph
+    this._graph.iri = defaultGraphIRI
+    this._dataset = new HashMapDataset(defaultGraphIRI, this._graph)
+    this._builder = new PlanBuilder(this._dataset, {}, customOperations)
+    this._builder.updateExecutor = new UpdateExecutorPlusLoad(this._dataset)
+    
+    this._executionContext = new ExecutionContext()
+    this._executionContext.setProperty('requestHandler', externalGraphFetcher)
+    this._executionContext.setProperty('dynamic-graph', true)
+
+  }
+
+  addNamedGraph(iri, db) {
+    this._dataset.addNamedGraph(iri, db)
+  }
+
+  getNamedGraph(iri) {
+    return this._dataset.getNamedGraph(iri)
+  }
+
+  execute(query, format = 'raw') {
+    const that = this
+    return this._builder.build(query, that._executionContext)
+  }
+}
+
+
+/**
+ * Request handler for testing
+ * 
+ * @param url
+ * @param context
+ */
+function externalGraphFetcher(url, context) {
+
+  let options = {
+      url,
+      headers: {
+        'Accept': 'text/turtle'
+      }
+    };
+  
+  const streamParser = StreamParser()
+  
+  const requestStream = request(options)
+      // .on('response', function(response) {
+      //     // console.log(response.statusCode)
+      //     // console.log(response.headers['content-type'])
+      // })
+  const nquad = requestStream.pipe(streamParser)
+  
+  return fromStream(nquad).pipe(data => {
+    return data
+  })
+}
+
+/**
+ * Converts node stream to rxjs streams
+ * @param stream 
+ */
+function fromStream(stream) {
+  stream.pause()
+  return new Observable(observer => {
+    function dataHandler(data) {
+      observer.next(data)
+    }
+
+    function errorHandler(err) {
+      observer.error(err)
+    }
+
+    function endHandler() {
+      observer.complete()
+    }
+
+    stream.addListener('data', dataHandler)
+    stream.addListener('error', errorHandler)
+    stream.addListener('end', endHandler)
+
+    stream.resume()
+
+    return () => {
+      stream.removeListener('data', dataHandler)
+      stream.removeListener('error', errorHandler)
+      stream.removeListener('end', endHandler)
+    }
+  })
+}
+
+
 module.exports = {
   getGraph,
-  TestEngine
+  TestEngine,
+  TestEnginePlusLoad
 }
