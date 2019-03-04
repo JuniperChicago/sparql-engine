@@ -24,6 +24,9 @@ SOFTWARE.
 
 'use strict'
 
+// context
+export { default as ExecutionContext } from './engine/context/execution-context'
+
 export { default as Dataset } from './rdf/dataset'
 export { BindingBase } from './rdf/bindings'
 export { default as HashMapDataset } from './rdf/hashmap-dataset'
@@ -36,6 +39,11 @@ export { default as GraphExecutor } from './engine/executors/graph-executor'
 export { default as ServiceExecutor } from './engine/executors/service-executor'
 export { default as UpdateExecutor } from './engine/executors/update-executor'
 // RDF terms Utilities
-export { terms } from './rdf-terms' 
+export { terms } from './rdf-terms'
 // formatters
+
+// comsumables
+export { ErrorConsumable } from './operators/update/consumer'
+export { default as InsertConsumer } from './operators/update/insert-consumer'
+
 // export { default as XMLFormatter } from './formatters/xml-formatter'
