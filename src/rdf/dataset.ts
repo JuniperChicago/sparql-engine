@@ -33,6 +33,16 @@ import UnionGraph from './union-graph'
  * @author Thomas Minier
  */
 export default abstract class Dataset {
+  private _graphFactory: (iri: string) => Graph | null;
+
+  /**
+   * Constructor
+   */
+  constructor () {
+    this._graphFactory = () => null
+  }
+
+
   abstract get iris (): string[]
   /**
    * Set the Default Graph of the Dataset
@@ -49,20 +59,20 @@ export default abstract class Dataset {
   /**
    * Add a Named Graph to the Dataset
    * @param iri - IRI of the Named Graph
-   * @param g    - RDF Graph
+   * @param g   - RDF Graph
    */
   abstract addNamedGraph (iri: string, g: Graph): void
 
   /**
    * Get a Named Graph using its IRI
-   * @param  {string} iri - IRI of the Named Graph to retrieve
+   * @param  iri - IRI of the Named Graph to retrieve
    * @return The corresponding Named Graph
    */
   abstract getNamedGraph (iri: string): Graph
 
   /**
    * Return True if the Dataset contains a Named graph with the provided IRI
-   * @param  {string} iri - IRI of the Named Graph
+   * @param  iri - IRI of the Named Graph
    * @return True if the Dataset contains a Named graph with the provided IRI
    */
   abstract hasNamedGraph (iri: string): boolean
@@ -70,8 +80,8 @@ export default abstract class Dataset {
   /**
    * Get an UnionGraph, i.e., the dynamic union of several graphs,
    * from the RDF Graphs in the Dataset.
-   * @param  {string[]} iris                  - Iris of the named graphs to include in the union
-   * @param  {Boolean} [includeDefault=false] - True if the default graph should be included
+   * @param  iris           - Iris of the named graphs to include in the union
+   * @param  includeDefault - True if the default graph should be included
    * @return The dynamic union of several graphs in the Dataset
    */
   getUnionGraph (iris: string[], includeDefault: boolean = false): UnionGraph {
@@ -85,7 +95,7 @@ export default abstract class Dataset {
 
   /**
    * Returns all Graphs in the Dataset, including the Default one
-   * @param  {Boolean} [includeDefault=false] - True if the default graph should be included
+   * @param  includeDefault - True if the default graph should be included
    * @return The list of all graphs in the Dataset
    */
   getAllGraphs (includeDefault: boolean = true): Graph[] {
@@ -97,5 +107,27 @@ export default abstract class Dataset {
       graphs.push(this.getNamedGraph(iri))
     })
     return graphs
+  }
+
+  /**
+   * Set the Graph Factory used by te dataset to create new RDF graphs on-demand
+   * @param  factory - Graph Factory
+   */
+  setGraphFactory (factory: (iri: string) => Graph) {
+    this._graphFactory = factory
+  }
+
+  /**
+   * Create a new RDF Graph, using the current Graph Factory.
+   * This Graph factory can be set using the "setGraphFactory" method.
+   * @param  iri - IRI of the graph to create
+   * @return A new RDF Graph
+   */
+  createGraph (iri: string): Graph {
+    const graph = this._graphFactory(iri)
+    if (graph === null) {
+      throw new Error(`Impossible to create a new Graph with IRI "${iri}". The RDF dataset does not seems to have a graph factory. Please set it using the "setGraphFactory" method.`)
+    }
+    return graph!
   }
 }

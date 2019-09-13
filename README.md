@@ -1,21 +1,21 @@
 # sparql-engine
 [![Build Status](https://travis-ci.org/Callidon/sparql-engine.svg?branch=master)](https://travis-ci.org/Callidon/sparql-engine)  [![codecov](https://codecov.io/gh/Callidon/sparql-engine/branch/master/graph/badge.svg)](https://codecov.io/gh/Callidon/sparql-engine) [![npm version](https://badge.fury.io/js/sparql-engine.svg)](https://badge.fury.io/js/sparql-engine) [![JavaScript Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://standardjs.com)
 
-An open-source framework for building SPARQL query engines in Javascript.
+An open-source framework for building SPARQL query engines in Javascript/Typescript.
 
 [Online documentation](https://callidon.github.io/sparql-engine/)
 
 **Main features**:
 * Build a [SPARQL](https://www.w3.org/TR/2013/REC-sparql11-overview-20130321/) query engine on top of any data storage system.
 * Supports [the full features of the SPARQL syntax](https://www.w3.org/TR/sparql11-query/) by *implementing a single class!*
+* Support for all [SPARQL property Paths](https://www.w3.org/TR/sparql11-query/#propertypaths).
 * Implements advanced *SPARQL query rewriting techniques* for transparently optimizing SPARQL query processing.
 * Supports [Custom SPARQL functions](#custom-functions).
 * Supports the [SPARQL UPDATE protocol](https://www.w3.org/TR/2013/REC-sparql11-update-20130321/).
 * Supports Basic [Federated SPARQL queries](https://www.w3.org/TR/2013/REC-sparql11-federated-query-20130321/) using **SERVICE clauses**.
-* Customize every step of SPARQL query processing, thanks to a component-based architecture.
+* Customize every step of SPARQL query processing, thanks to *a modular architecture*.
 
 :warning: **In Development** :warning:
-* Support for all SPARQL property Paths.
 * Support for SPARQL Graph Management protocol
 
 # Table of contents
@@ -26,9 +26,11 @@ An open-source framework for building SPARQL query engines in Javascript.
   * [RDF Graphs](#rdf-graphs)
   * [RDF Datasets](#rdf-datasets)
   * [Running a SPARQL query](#running-a-sparql-query)
-* [Custom Functions](#custom-functions)
 * [Federated SPARQL Queries](#federated-sparql-queries)
+* [Custom Functions](#custom-functions)
 * [Advanced Usage](#advanced-usage)
+  * [Customize the pipeline implementation](#customize-the-pipeline-implementation)
+  * [Customize query execution](#customize-query-execution)
 * [Documentation](#documentation)
 * [References](#references)
 
@@ -59,6 +61,7 @@ As a starting point, we provide you with two examples of integration:
 
 This framework represents RDF triples using Javascript Object.
 You will find below, in Java-like syntax, the "shape" of such object.
+
 ```typescript
 interface TripleObject {
   subject: string; // The Triple's subject
@@ -131,7 +134,7 @@ Once you have your subclass of `Graph` ready, you need to build a collection of 
 
 ```javascript
  const { HashMapDataset } = require('sparql-engine')
- const CustomGraph = // import your Graph subclass
+ const CustomGraph = require(/* import your Graph subclass */)
 
  const GRAPH_A_IRI = 'http://example.org#graph-a'
  const GRAPH_B_IRI = 'http://example.org#graph-b'
@@ -175,6 +178,34 @@ Finally, to run a SPARQL query on your RDF dataset, you need to use the `PlanBui
     () => console.log('Query evaluation complete!')
   )
 ```
+
+# Federated SPARQL Queries
+
+The `sparql-engine` framework provides automatic support for evaluating [federated SPARQL queries](https://www.w3.org/TR/2013/REC-sparql11-federated-query-20130321/), using the [`SERVICE` keyword](https://www.w3.org/TR/sparql11-query/#basic-federated-query).
+
+To enable them, you need to set **a Graph Factory** for the RDF dataset used to evaluate SPARQL queries.
+This Graph factory is used by the dataset to create new RDF Graph on-demand.
+To set it, you need to use the [`Dataset.setGraphFactory`](https://callidon.github.io/sparql-engine/classes/dataset.html#setgraphfactory) method, as detailed below.
+It takes *a callback* as parameter, which will be invoked to create a new graph from an IRI.
+It's your responsibility to define the graph creation logic, depending on your application.
+
+```typescript
+const { HashMapDataset } = require('sparql-engine')
+const CustomGraph = require(/* import your Graph subclass */)
+
+const my_graph = new CustomGraph(/* ... */)
+
+const dataset = new HashMapDataset('http://example.org#graph-a', my_graph)
+
+// set the Graph factory of the dataset
+dataset.setGraphFactory(iri => {
+  // return a new graph for the provided iri
+  return new CustomGraph(/* .. */)
+})
+```
+
+Once the Graph factory is set, you have nothing more to do!
+Juste execute your federated SPARQL queries as regular queries, like before!
 
 # Custom Functions
 
@@ -242,80 +273,84 @@ GROUP BY ?length
 HAVING (example:IS_EVEN(?length))
 ```
 
-# Federated SPARQL Queries
-
-The `sparql-engine` framework provides support for evaluating [federated SPARQL queries](https://www.w3.org/TR/2013/REC-sparql11-federated-query-20130321/), using the **SERVICE keyword**.
-As with a `Graph`, you simply need to provides an implementation of a [`ServiceExecutor`](https://github.com/Callidon/sparql-engine/blob/master/src/engine/executors/service-executor.js), a class used as a building block by the engine to evaluates SERVICE clauses.
-The only method that needs to be implemented is the `ServiceExecutor._execute` method,
-as detailed below.
-
-```typescript
-const { ServiceExecutor } = require('sparql-engine')
-
-class MyServiceExecutor extends ServiceExecutor {
-  /**
-   * Constructor
-   * @param builder - PlanBuilder instance
-   */
-  constructor (builder: PlanBuilder) {}
-
-  /**
-   * Returns an iterator used to evaluate a SERVICE clause
-   * @param  source    - Source observable
-   * @param  iri       - Iri of the SERVICE clause
-   * @param  subquery  - Subquery to be evaluated
-   * @param  options   - Execution options
-   * @return An observable used to evaluate a SERVICE clause
-   */
-  _execute (source: Observable<Bindings>, iri: string, subquery: Object, options: Object): Observable<Bindings> { /* ... */}
-}
-```
-
-Once your custom ServiceExecutor is ready, you need to *install* it on a `PlanBuilder` instance.
-```javascript
-  const { ServiceExecutor } = require('sparql-engine')
-  // Suppose a custom ServiceExecutor
-  class CustomServiceExecutor extends ServiceExecutor { /* ... */ }
-
-  const builder = new PlanBuilder()
-  builder.serviceExecutor = new CustomServiceExecutor(builder)
-
-  // Then, use the builder as usual to evaluate Federated SPARQL queries
-  const iterator = builder.build(/* ... */)
-  // ...
-```
-
 # Advanced usage
 
-## Building the Physical Query Execution Plan yourself
+## Customize the pipeline implementation
 
-As introduced before, a `PlanBuilder` rely on **Executors** to build the *physical query execution plan*
-of a SPARQL query. If you wish to configure how this plan is built, then you just have to extends the various executors
-available. The following table gives you all informations needed about the available executors.
+The class `PipelineEngine` (and its subclasses) is the main component used by `sparql-engine` to evaluate all SPARQL operations. It defines basic operations (`map`, `filter`, etc) that can be used
+to manipulate intermediate results and evaluate SPARQL queries.
+
+By default, the framework uses an implementation of `PipelineEngine` based on [`rxjs`](https://rxjs-dev.firebaseapp.com/), to implements a SPARQL query execution plan as a pipeline of iterators.
+However, **you are able to switch to others implementations** of `PipelineEngine`, using `Pipeline.setInstance`.
+
+```javascript
+const { Pipeline, PipelineEngine } = require('sparql-engine')
+
+class CustomEngine extends PipelineEngine {
+  // ...
+}
+
+// add this before creating a new plan builder
+Pipeline.setInstance(new CustomEngine())
+// ...
+```
+
+Two implementations of `PipelineEngine` are provided by default.
+* `RxjsPipeline`, based on [`rxjs`](https://rxjs-dev.firebaseapp.com/), which provides a pure pipeline approach. This approach is **selected by default** when loading the framework.
+* `VectorPipeline`, which materializes all intermediate results at each pipeline computation step. This approach is more efficient CPU-wise, but also consumes a lot more memory.
+
+These implementations can be imported as follows:
+```javascript
+const { RxjsPipeline, VectorPipeline } = require('sparql-engine')
+```
+
+## Customize query execution
+
+A `PlanBuilder` implements a [Builder pattern](https://en.wikipedia.org/wiki/Builder_pattern) in order to create a physical query execution plan for a given SPARQL query.
+Internally, it defines [*stages builders*](https://callidon.github.io/sparql-engine/classes/stagebuilder) to generates operators for executing all types of SPARQL operations.
+For example, the [`OrderByStageBuilder`](https://callidon.github.io/sparql-engine/classes/orderbystagebuilder.html) is invoked when the `PlanBuilder` needs to evaluate an `ORDER BY` modifier.
+
+If you want to customize how query execution plans are built, you have to implement your own stage builders, by extending existing ones.
+Then, you need to configure your plan builder to use them, with the [`use` function](https://callidon.github.io/sparql-engine/classes/planbuilder.html#use).
+
+```javascript
+  const { PlanBuilder, stages } = require('sparql-engine')
+
+  class MyOrderByStageBuilder extends stages.OrderByStageBuilder {
+    /* Define your custom execution logic for ORDER BY */
+  }
+
+  const dataset = /* a RDF dataset */
+
+  // Creates a plan builder for the RDF dataset
+  const builder = new PlanBuilder(dataset)
+
+  // Plug-in your custom stage builder
+  builder.use(stages.SPARQL_OPERATION.ORDER_BY, MyOrderByStageBuilder(dataset))
+
+  // Now, execute SPARQL queries as before with your PlanBuilder
+```
+
+You will find below a reference table of all stage builders used by `sparql-engine` to evaluate SPARQL queries. Please see [the API documentation](https://callidon.github.io/sparql-engine/classes/stagebuilder) for more details.
 
 **Executors**
 
-| Base class | Used to handle | PlanBuilder setter |
-|------------|----------------|--------------------|
-| [BGPExecutor](https://github.com/Callidon/sparql-engine/blob/master/src/engine/executors/bgp-executor.js) | [Basic Graph Patterns](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#BasicGraphPatterns) | `builder.bgpExecutor = ...` |
-| [GraphExecutor](https://github.com/Callidon/sparql-engine/blob/master/src/engine/executors/graph-executor.js) | [SPARQL GRAPH](https://www.w3.org/TR/sparql11-query/#queryDataset) | `builder.graphExecutor = ...` |
-| [ServiceExecutor](https://github.com/Callidon/sparql-engine/blob/master/src/engine/executors/service-executor.js) | [SPARQL Service](https://www.w3.org/TR/2013/REC-sparql11-federated-query-20130321/) | `builder.serviceExecutor = ...` |
-| [AggregateExecutor](https://github.com/Callidon/sparql-engine/blob/master/src/engine/executors/aggregate-executor.js) | [SPARQL Aggregates](https://www.w3.org/TR/sparql11-query/#aggregates) | `builder.aggregateExecutor = ...` |
-| [UpdateExecutor](https://github.com/Callidon/sparql-engine/blob/master/src/engine/executors/update-executor.js) | [SPARQL UPDATE protocol](https://www.w3.org/TR/2013/REC-sparql11-update-20130321/) | `builder.updateExecutor = ...` |
+| SPARQL Operation | Default Stage Builder | Symbol |
+|------------------|-----------------------|--------|
+| [Aggregates](https://www.w3.org/TR/sparql11-query/#aggregates) | [AggregateStageBuilder](https://callidon.github.io/sparql-engine/classes/aggregatestagebuilder.html) | `SPARQL_OPERATION.AGGREGATE` |
+| [Basic Graph Patterns](https://www.w3.org/TR/sparql11-query/#BasicGraphPatterns) | [BGPStageBuilder](https://callidon.github.io/sparql-engine/classes/bgpstagebuilder.html) | `SPARQL_OPERATION.BGP` |
+| [BIND](https://www.w3.org/TR/sparql11-query/#bind) | [BindStageBuilder](https://callidon.github.io/sparql-engine/classes/bindstagebuilder.html) | `SPARQL_OPERATION.BIND` |
+| [DISTINCT](https://www.w3.org/TR/sparql11-query/#neg-minus) | [DistinctStageBuilder](https://callidon.github.io/sparql-engine/classes/distinctstagebuilder.html) | `SPARQL_OPERATION.DISTINCT` |
+| [FILTER](https://www.w3.org/TR/sparql11-query/#expressions) | [FilterStageBuilder](https://callidon.github.io/sparql-engine/classes/filterstagebuilder.html) | `SPARQL_OPERATION.FILTER` |
+| [Property Paths](https://www.w3.org/TR/sparql11-query/#propertypaths) | [PathStageBuilder](https://callidon.github.io/sparql-engine/classes/pathstagebuilder.html) | `SPARQL_OPERATION.PROPERTY_PATH` |
+| [GRAPH](https://www.w3.org/TR/sparql11-query/#rdfDataset) | [GraphStageBuilder](https://callidon.github.io/sparql-engine/classes/graphstagebuilder.html) | `SPARQL_OPERATION.GRAPH` |
+| [MINUS](https://www.w3.org/TR/sparql11-query/#neg-minus) | [MinusStageBuilder](https://callidon.github.io/sparql-engine/classes/minusstagebuilder.html) | `SPARQL_OPERATION.MINUS` |
+| [OPTIONAL](https://www.w3.org/TR/sparql11-query/#optionals) | [OptionalStageBuilder](https://callidon.github.io/sparql-engine/classes/optionalstagebuilder.html) | `SPARQL_OPERATION.OPTIONAL` |
+| [ORDER_BY](https://www.w3.org/TR/sparql11-query/#modOrderBy) | [OrderByStageBuilder](https://callidon.github.io/sparql-engine/classes/orderbystagebuilder.html) | `SPARQL_OPERATION.ORDER_BY` |
+| [SERVICE](https://www.w3.org/TR/sparql11-query/#basic-federated-query) | [ServiceStageBuilder](https://callidon.github.io/sparql-engine/classes/servicestagebuilder.html) | `SPARQL_OPERATION.SERVICE` |
+| [UNION](https://www.w3.org/TR/sparql11-query/#alternatives) | [UnionStageBuilder](https://callidon.github.io/sparql-engine/classes/unionstagebuilder.html) | `SPARQL_OPERATION.UNION` |
+| [UPDATE](https://www.w3.org/TR/2013/REC-sparql11-update-20130321/) | [UpdateStageBuilder](https://callidon.github.io/sparql-engine/classes/updatestagebuilder.html) | `SPARQL_OPERATION.UPDATE` |
 
-The following example show you how to install your custom executors on a `PlanBuilder` instance.
-```javascript
-  const { BGPExecutor } = require('sparql-engine')
-  // Suppose a custom BGPExecutor
-  class CustomBGPExecutor extends BGPExecutor { /* ... */ }
-
-  const builder = new PlanBuilder()
-  builder.bgpExecutor = new CustomBGPExecutor()
-
-  // Then, use the builder as usual to evaluate SPARQL queries
-  const iterator = builder.build(/* ... */)
-  // ...
-```
 
 # Documentation
 

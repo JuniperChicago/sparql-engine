@@ -1,4 +1,4 @@
-/* file : bgp-executor.ts
+/* file : bgp-stage-builder.ts
 MIT License
 
 Copyright (c) 2018 Thomas Minier
@@ -24,56 +24,44 @@ SOFTWARE.
 
 'use strict'
 
-import Executor from './executor'
-import { Observable, from } from 'rxjs'
-import { map, mergeMap } from 'rxjs/operators'
+import StageBuilder from './stage-builder'
+import { Pipeline } from '../pipeline/pipeline'
+import { PipelineStage } from '../pipeline/pipeline-engine'
 // import { some } from 'lodash'
 import { Algebra } from 'sparqljs'
 import Graph from '../../rdf/graph'
-import Dataset from '../../rdf/dataset'
 import { Bindings } from '../../rdf/bindings'
-import { GRAPH_CAPABILITY } from '../../rdf/graph_capability'
+// import { GRAPH_CAPABILITY } from '../../rdf/graph_capability'
 import { parseHints } from '../context/query-hints'
 import ExecutionContext from '../context/execution-context'
 
-import boundJoin from '../../operators/join/bound-join'
+// import boundJoin from '../../operators/join/bound-join'
 
 /**
- * Basic iterator used to evaluate Basic graph patterns using the "evalBGP" method
+ * Basic {@link PipelineStage} used to evaluate Basic graph patterns using the "evalBGP" method
  * available
  * @private
  */
- function bgpEvaluation (bgp: Algebra.TripleObject[], graph: Graph, context: ExecutionContext) {
-   return mergeMap((bindings: Bindings) => {
+ function bgpEvaluation (source: PipelineStage<Bindings>, bgp: Algebra.TripleObject[], graph: Graph, context: ExecutionContext) {
+   const engine = Pipeline.getInstance()
+   return engine.mergeMap(source, (bindings: Bindings) => {
      let boundedBGP = bgp.map(t => bindings.bound(t))
      // const hasVars = boundedBGP.map(p => some(p, v => v!.startsWith('?')))
      //   .reduce((acc, v) => acc && v, true)
-     return from(graph.evalBGP(boundedBGP, context))
-       .pipe(map((item: Bindings) => {
-         // if (item.size === 0 && hasVars) return null
-         return item.union(bindings)
-       }))
+     return engine.map(graph.evalBGP(boundedBGP, context), (item: Bindings) => {
+       // if (item.size === 0 && hasVars) return null
+       return item.union(bindings)
+     })
    })
  }
 
 /**
- * A BGPExecutor is responsible for evaluation BGP in a SPARQL query.
- * Users can extend this class and overrides the "_execute" method to customize BGP evaluation.
+ * A BGPStageBuilder evaluates Basic Graph Patterns in a SPARQL query.
+ * Users can extend this class and overrides the "_buildIterator" method to customize BGP evaluation.
  * @author Thomas Minier
  * @author Corentin Marionneau
  */
-export default class BGPExecutor extends Executor {
-  readonly _dataset: Dataset
-
-  /**
-   * Constructor
-   * @param dataset - RDF Dataset used during query execution
-   */
-  constructor (dataset: Dataset) {
-    super()
-    this._dataset = dataset
-  }
-
+export default class BGPStageBuilder extends StageBuilder {
   /**
    * Return the RDF Graph to be used for BGP evaluation.
    * * If `iris` is empty, returns the default graph
@@ -84,31 +72,33 @@ export default class BGPExecutor extends Executor {
    */
   _getGraph (iris: string[]): Graph {
     if (iris.length === 0) {
-      return this._dataset.getDefaultGraph()
+      return this.dataset.getDefaultGraph()
     } else if (iris.length === 1) {
-      return this._dataset.getNamedGraph(iris[0])
+      return this.dataset.getNamedGraph(iris[0])
     }
-    return this._dataset.getUnionGraph(iris)
+    return this.dataset.getUnionGraph(iris)
   }
 
   /**
-   * Build an iterator to evaluate a BGP
-   * @param  source    - Source iterator
+   * Build a {@link PipelineStage} to evaluate a BGP
+   * @param  source    - Input {@link PipelineStage}
    * @param  patterns  - Set of triple patterns
    * @param  options   - Execution options
-   * @return An iterator used to evaluate a Basic Graph pattern
+   * @return A {@link PipelineStage} used to evaluate a Basic Graph pattern
    */
-  buildIterator (source: Observable<Bindings>, patterns: Algebra.TripleObject[], context: ExecutionContext): Observable<Bindings> {
+  execute (source: PipelineStage<Bindings>, patterns: Algebra.TripleObject[], context: ExecutionContext): PipelineStage<Bindings> {
+    // avoids sending a request with an empty array
+    if(patterns.length == 0) return source
     // select the graph to use for BGP evaluation
-    const graph = (context.defaultGraphs.length > 0) ? this._getGraph(context.defaultGraphs) : this._dataset.getDefaultGraph()
+    const graph = (context.defaultGraphs.length > 0) ? this._getGraph(context.defaultGraphs) : this.dataset.getDefaultGraph()
     // extract eventual query hints from the BGP & merge them into the context
     let extraction = parseHints(patterns, context.hints)
     context.hints = extraction[1]
     // rewrite a BGP to remove blank node addedd by the Turtle notation
     const [bgp, artificals] = this._replaceBlankNodes(extraction[0])
-    let iterator = this._execute(source, graph, bgp, context)
+    let iterator = this._buildIterator(source, graph, bgp, context)
     if (artificals.length > 0) {
-      iterator = iterator.pipe(map(b => b.filter(variable => artificals.indexOf(variable) < 0)))
+      iterator = Pipeline.getInstance().map(iterator, (b: Bindings) => b.filter(variable => artificals.indexOf(variable) < 0))
     }
     return iterator
   }
@@ -141,18 +131,18 @@ export default class BGPExecutor extends Executor {
   }
 
   /**
-   * Returns an iterator used to evaluate a Basic Graph pattern
-   * @param  source         - Source iterator
+   * Returns a {@link PipelineStage} used to evaluate a Basic Graph pattern
+   * @param  source         - Input {@link PipelineStage}
    * @param  graph          - The graph on which the BGP should be executed
    * @param  patterns       - Set of triple patterns
    * @param  options        - Execution options
    * @param  isJoinIdentity - True if the source iterator is the starting iterator of the pipeline
-   * @return An iterator used to evaluate a Basic Graph pattern
+   * @return A {@link PipelineStage} used to evaluate a Basic Graph pattern
    */
-  _execute (source: Observable<Bindings>, graph: Graph, patterns: Algebra.TripleObject[], context: ExecutionContext): Observable<Bindings> {
-    if (graph._isCapable(GRAPH_CAPABILITY.UNION)) {
-      return boundJoin(source, patterns, graph, context)
-    }
-    return source.pipe(bgpEvaluation(patterns, graph, context))
+  _buildIterator (source: PipelineStage<Bindings>, graph: Graph, patterns: Algebra.TripleObject[], context: ExecutionContext): PipelineStage<Bindings> {
+    // if (graph._isCapable(GRAPH_CAPABILITY.UNION)) {
+    //   return boundJoin(source, patterns, graph, context)
+    // }
+    return bgpEvaluation(source, patterns, graph, context)
   }
 }

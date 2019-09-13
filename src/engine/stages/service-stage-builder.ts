@@ -1,4 +1,4 @@
-/* file : service-executor.ts
+/* file : service-stage-builder.ts
 MIT License
 
 Copyright (c) 2018 Thomas Minier
@@ -24,27 +24,27 @@ SOFTWARE.
 
 'use strict'
 
-import Executor from './executor'
+import StageBuilder from './stage-builder'
 import { Algebra } from 'sparqljs'
-import { Observable } from 'rxjs'
+import { Pipeline } from '../pipeline/pipeline'
+import { PipelineStage } from '../pipeline/pipeline-engine'
 import { Bindings } from '../../rdf/bindings'
 import ExecutionContext from '../context/execution-context'
 
 /**
- * A ServiceExecutor is responsible for evaluation a SERVICE clause in a SPARQL query.
- * @abstract
+ * A ServiceStageBuilder is responsible for evaluation a SERVICE clause in a SPARQL query.
  * @author Thomas Minier
  * @author Corentin Marionneau
  */
-export default abstract class ServiceExecutor extends Executor {
+export default class ServiceStageBuilder extends StageBuilder {
   /**
-   * Build an iterator to evaluate a SERVICE clause
-   * @param  source  - Source iterator
+   * Build a {@link PipelineStage} to evaluate a SERVICE clause
+   * @param  source  - Input {@link PipelineStage}
    * @param  node    - Service clause
    * @param  options - Execution options
-   * @return An iterator used to evaluate a SERVICE clause
+   * @return A {@link PipelineStage} used to evaluate a SERVICE clause
    */
-  buildIterator (source: Observable<Bindings>, node: Algebra.ServiceNode, context: ExecutionContext): Observable<Bindings> {
+  execute (source: PipelineStage<Bindings>, node: Algebra.ServiceNode, context: ExecutionContext): PipelineStage<Bindings> {
     let subquery: Algebra.RootNode
     if (node.patterns[0].type === 'query') {
       subquery = (<Algebra.RootNode> node.patterns[0])
@@ -57,17 +57,32 @@ export default abstract class ServiceExecutor extends Executor {
         where: node.patterns
       }
     }
-    return this._execute(source, node.name, subquery, context)
+    // auto-add the graph used to evaluate the SERVICE close if it is missing from the dataset
+    if ((this.dataset.getDefaultGraph().iri !== node.name) && (!this.dataset.hasNamedGraph(node.name))) {
+      const graph = this.dataset.createGraph(node.name)
+      this.dataset.addNamedGraph(node.name, graph)
+    }
+    let handler = undefined
+    if (node.silent) {
+      handler = () => {
+        return <PipelineStage<Bindings>> Pipeline.getInstance().empty()
+      }
+    }
+    return Pipeline.getInstance().catch(this._buildIterator(source, node.name, subquery, context), handler)
   }
 
   /**
-   * Returns an iterator used to evaluate a SERVICE clause
+   * Returns a {@link PipelineStage} used to evaluate a SERVICE clause
    * @abstract
-   * @param source    - Source iterator
+   * @param source    - Input {@link PipelineStage}
    * @param iri       - Iri of the SERVICE clause
    * @param subquery  - Subquery to be evaluated
    * @param options   - Execution options
-   * @return An iterator used to evaluate a SERVICE clause
+   * @return A {@link PipelineStage} used to evaluate a SERVICE clause
    */
-  abstract _execute (source: Observable<Bindings>, iri: string, subquery: Algebra.RootNode, context: ExecutionContext): Observable<Bindings>
+  _buildIterator (source: PipelineStage<Bindings>, iri: string, subquery: Algebra.RootNode, context: ExecutionContext): PipelineStage<Bindings> {
+    const opts = context.clone()
+    opts.defaultGraphs = [ iri ]
+    return this._builder!._buildQueryPlan(subquery, opts, source)
+  }
 }

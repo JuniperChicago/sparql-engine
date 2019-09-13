@@ -1,4 +1,4 @@
-/* file : update-executor.ts
+/* file : update-stage-builder.ts
 MIT License
 
 Copyright (c) 2018 Thomas Minier
@@ -24,9 +24,9 @@ SOFTWARE.
 
 'use strict'
 
-import Executor from './executor'
-import { Observable, of } from 'rxjs'
-import { shareReplay } from 'rxjs/operators'
+import StageBuilder from './stage-builder'
+import { Pipeline } from '../pipeline/pipeline'
+import { PipelineStage } from '../pipeline/pipeline-engine'
 import { Consumable, ErrorConsumable } from '../../operators/update/consumer'
 import InsertConsumer from '../../operators/update/insert-consumer'
 import DeleteConsumer from '../../operators/update/delete-consumer'
@@ -35,28 +35,16 @@ import ManyConsumers from '../../operators/update/many-consumers'
 import construct from '../../operators/modifiers/construct'
 import * as rewritings from './rewritings.js'
 import Graph from '../../rdf/graph'
-import Dataset from '../../rdf/dataset'
 import { Algebra } from 'sparqljs'
 import { Bindings, BindingBase } from '../../rdf/bindings'
 import ExecutionContext from '../context/execution-context'
 
 /**
- * An UpdateExecutor is an executor responsible for evaluating SPARQL UPDATE queries.
+ * An UpdateStageBuilder evaluates SPARQL UPDATE queries.
  * @see https://www.w3.org/TR/2013/REC-sparql11-update-20130321
  * @author Thomas Minier
  */
-export default class UpdateExecutor extends Executor {
-  private readonly _dataset: Dataset
-
-  /**
-   * Constructor
-   * @param dataset - RDF Dataset used during query execution
-   */
-  constructor (dataset: Dataset) {
-    super()
-    this._dataset = dataset
-  }
-
+export default class UpdateStageBuilder extends StageBuilder {
   /**
    * Create a {@link Consumable} used to evaluate a SPARQL 1.1 Update query
    * @param updates - Set of Update queries to execute
@@ -112,7 +100,8 @@ export default class UpdateExecutor extends Executor {
    * @return A Consumer used to evaluate SPARQL UPDATE queries
    */
   _handleInsertDelete (update: Algebra.UpdateQueryNode, context: ExecutionContext): Consumable {
-    let source: Observable<Bindings> = of(new BindingBase())
+    const engine = Pipeline.getInstance()
+    let source: PipelineStage<Bindings> = engine.of(new BindingBase())
     let graph: Graph | null = null
     let consumables: Consumable[] = []
 
@@ -132,7 +121,7 @@ export default class UpdateExecutor extends Executor {
     }
 
     // clone the source first
-    source = source.pipe(shareReplay(5))
+    source = engine.clone(source)
 
     // build consumers to evaluate DELETE clauses
     if ('delete' in update && update.delete!.length > 0) {
@@ -153,12 +142,12 @@ export default class UpdateExecutor extends Executor {
   /**
    * Build a consumer to evaluate a SPARQL INSERT clause
    * @private
-   * @param source - Source iterator
+   * @param source - Input {@link PipelineStage}
    * @param group - parsed SPARQL INSERT clause
    * @param graph - RDF Graph used to insert data
    * @return A consumer used to evaluate a SPARQL INSERT clause
    */
-  _buildInsertConsumer (source: Observable<Bindings>, group: Algebra.BGPNode | Algebra.UpdateGraphNode, graph: Graph | null, context: ExecutionContext): InsertConsumer {
+  _buildInsertConsumer (source: PipelineStage<Bindings>, group: Algebra.BGPNode | Algebra.UpdateGraphNode, graph: Graph | null, context: ExecutionContext): InsertConsumer {
     const tripleSource = construct(source, {template: group.triples})
     if (graph === null) {
       graph = (group.type === 'graph' && 'name' in group) ? this._dataset.getNamedGraph(group.name) : this._dataset.getDefaultGraph()
@@ -169,12 +158,12 @@ export default class UpdateExecutor extends Executor {
   /**
    * Build a consumer to evaluate a SPARQL DELETE clause
    * @private
-   * @param  source - Source iterator
+   * @param  source - Input {@link PipelineStage}
    * @param  group - parsed SPARQL DELETE clause
    * @param  graph - RDF Graph used to delete data
    * @return A consumer used to evaluate a SPARQL DELETE clause
    */
-  _buildDeleteConsumer (source: Observable<Bindings>, group: Algebra.BGPNode | Algebra.UpdateGraphNode, graph: Graph | null, context: ExecutionContext): DeleteConsumer {
+  _buildDeleteConsumer (source: PipelineStage<Bindings>, group: Algebra.BGPNode | Algebra.UpdateGraphNode, graph: Graph | null, context: ExecutionContext): DeleteConsumer {
     const tripleSource = construct(source, {template: group.triples})
     if (graph === null) {
       graph = (group.type === 'graph' && 'name' in group) ? this._dataset.getNamedGraph(group.name) : this._dataset.getDefaultGraph()
