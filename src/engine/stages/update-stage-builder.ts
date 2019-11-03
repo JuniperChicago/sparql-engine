@@ -53,6 +53,7 @@ export default class UpdateStageBuilder extends StageBuilder {
    */
   execute (updates: Array<Algebra.UpdateQueryNode | Algebra.UpdateClearNode | Algebra.UpdateCopyMoveNode>, context: ExecutionContext): Consumable {
     let queries
+    let name
     return new ManyConsumers(updates.map(update => {
       if ('updateType' in update) {
         switch (update.updateType) {
@@ -72,18 +73,38 @@ export default class UpdateStageBuilder extends StageBuilder {
           case 'copy':
             // A COPY query is rewritten into a sequence [CLEAR query, INSERT query]
             queries = rewritings.rewriteCopy(<Algebra.UpdateCopyMoveNode> update, this._dataset)
-            return new ManyConsumers([
-              this._handleClearQuery(queries[0]),
-              this._handleInsertDelete(queries[1], context)
-            ])
+
+            name = ('graph' in queries[0] && queries[0].graph['name']) ? queries[0].graph.name : null
+
+            if (name && !this._dataset.hasNamedGraph(name)) {
+              return new ManyConsumers([
+                this._handleInsertDelete(queries[1], context)
+              ])
+            } else {
+              return new ManyConsumers([
+                this._handleClearQuery(queries[0]),
+                this._handleInsertDelete(queries[1], context)
+              ])
+            }
           case 'move':
             // A MOVE query is rewritten into a sequence [CLEAR query, INSERT query, CLEAR query]
             queries = rewritings.rewriteMove(<Algebra.UpdateCopyMoveNode> update, this._dataset)
-            return new ManyConsumers([
-              this._handleClearQuery(queries[0]),
-              this._handleInsertDelete(queries[1], context),
-              this._handleClearQuery(queries[2])
-            ])
+
+            name = ('graph' in queries[0] && queries[0].graph['name']) ? queries[0].graph.name : null
+
+            if (name && !this._dataset.hasNamedGraph(name)) {
+              return new ManyConsumers([
+                this._handleInsertDelete(queries[1], context),
+                this._handleClearQuery(queries[2])
+              ])
+            } else {
+              return new ManyConsumers([
+                this._handleClearQuery(queries[0]),
+                this._handleInsertDelete(queries[1], context),
+                this._handleClearQuery(queries[2])
+              ])
+            }
+
           default:
             return new ErrorConsumable(`Unsupported SPARQL UPDATE query: ${update.type}`)
         }
@@ -150,7 +171,17 @@ export default class UpdateStageBuilder extends StageBuilder {
   _buildInsertConsumer (source: PipelineStage<Bindings>, group: Algebra.BGPNode | Algebra.UpdateGraphNode, graph: Graph | null, context: ExecutionContext): InsertConsumer {
     const tripleSource = construct(source, {template: group.triples})
     if (graph === null) {
-      graph = (group.type === 'graph' && 'name' in group) ? this._dataset.getNamedGraph(group.name) : this._dataset.getDefaultGraph()
+      if (group.type === 'graph' && 'name' in group) {
+        if (!this.dataset.hasNamedGraph(group.name)) {
+          graph = this.dataset.createGraph(group.name)
+          this.dataset.addNamedGraph(group.name, graph)
+        } else {
+          graph = this._dataset.getNamedGraph(group.name)
+        }
+      } else {
+        graph = this._dataset.getDefaultGraph()
+      }
+      // graph = (group.type === 'graph' && 'name' in group) ? this._dataset.getNamedGraph(group.name) : this._dataset.getDefaultGraph()
     }
     return new InsertConsumer(tripleSource, graph, context)
   }

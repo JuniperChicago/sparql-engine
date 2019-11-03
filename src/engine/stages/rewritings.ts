@@ -67,7 +67,7 @@ function buildGroupClause (source: Algebra.UpdateGraphTarget, dataset: Dataset, 
     return allBGP()
   } else {
     // a SILENT modifier prevents errors when using an unknown graph
-    if (!(dataset.hasNamedGraph(source.name!)) && !isSilent) {
+    if (!(dataset.hasNamedGraph(source.name!)) && !(dataset.hasGraphFactory) && !isSilent) {
       throw new Error(`Unknown Source Graph in ADD query ${source.name}`)
     }
     return {
@@ -91,8 +91,11 @@ function buildWhereClause (source: Algebra.UpdateGraphTarget, dataset: Dataset, 
   if (source.default) {
     return allBGP()
   } else {
+
+
+
     // a SILENT modifier prevents errors when using an unknown graph
-    if (!(dataset.hasNamedGraph(source.name!)) && !isSilent) {
+    if (!(dataset.hasNamedGraph(source.name!)) && !(dataset.hasGraphFactory) && !isSilent) {
       throw new Error(`Unknown Source Graph in ADD query ${source.name}`)
     }
     const bgp: Algebra.BGPNode = {

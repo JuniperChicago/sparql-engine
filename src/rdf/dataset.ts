@@ -34,12 +34,17 @@ import UnionGraph from './union-graph'
  */
 export default abstract class Dataset {
   private _graphFactory: (iri: string) => Graph | null
+  private _hasGraphFactory: boolean
 
   /**
    * Constructor
    */
   constructor () {
     this._graphFactory = () => null
+    this._hasGraphFactory = false
+  }
+  get hasGraphFactory (): boolean {
+    return this._hasGraphFactory
   }
 
   abstract get iris (): string[]
@@ -114,6 +119,7 @@ export default abstract class Dataset {
    */
   setGraphFactory (factory: (iri: string) => Graph) {
     this._graphFactory = factory
+    this._hasGraphFactory = true
   }
 
   /**
@@ -127,6 +133,6 @@ export default abstract class Dataset {
     if (graph === null) {
       throw new Error(`Impossible to create a new Graph with IRI "${iri}". The RDF dataset does not seems to have a graph factory. Please set it using the "setGraphFactory" method.`)
     }
-    return graph!
+    return graph
   }
 }
