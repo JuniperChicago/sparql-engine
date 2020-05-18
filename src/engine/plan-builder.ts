@@ -1,7 +1,7 @@
 /* file : plan-builder.ts
 MIT License
 
-Copyright (c) 2018 Thomas Minier
+Copyright (c) 2018-2020 Thomas Minier
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,6 @@ import { Consumable } from '../operators/update/consumer'
 import { Pipeline } from '../engine/pipeline/pipeline'
 import { PipelineStage } from '../engine/pipeline/pipeline-engine'
 // RDF core classes
-import { terms } from '../rdf-terms'
 import { Bindings, BindingBase } from '../rdf/bindings'
 import Dataset from '../rdf/dataset'
 // Optimization
@@ -55,6 +54,8 @@ import OptionalStageBuilder from './stages/optional-stage-builder'
 import OrderByStageBuilder from './stages/orderby-stage-builder'
 import UnionStageBuilder from './stages/union-stage-builder'
 import UpdateStageBuilder from './stages/update-stage-builder'
+// caching
+import { BGPCache, LRUBGPCache } from './cache/bgp-cache'
 // utilities
 import {
   partition,
@@ -66,6 +67,8 @@ import {
 } from 'lodash'
 
 import ExecutionContext from './context/execution-context'
+import ContextSymbols from './context/symbols'
+import { CustomFunctions } from '../operators/expressions/sparql-expression'
 import { extractPropertyPaths } from './stages/rewritings'
 import { extendByBindings, deepApplyBindings, rdf } from '../utils'
 
@@ -79,11 +82,6 @@ const QUERY_MODIFIERS = {
  * Output of a physical query execution plan
  */
 export type QueryOutput = Bindings | Algebra.TripleObject | boolean
-
-/**
- * Type alias to describe the shape of custom functions. It's basically a JSON object from an IRI (in string form) to a function of 0 to many RDFTerms that produces an RDFTerm.
- */
-export type CustomFunctions = { [key: string]: (...args: (terms.RDFTerm | terms.RDFTerm[] | null)[]) => terms.RDFTerm }
 
 /*
  * Class of SPARQL operations that are evaluated by a Stage Builder
@@ -118,6 +116,7 @@ export class PlanBuilder {
   private _optimizer: Optimizer
   private _stageBuilders: Map<SPARQL_OPERATION, StageBuilder>
   private _customFunctions: CustomFunctions | undefined
+  private _currentCache: BGPCache | null
 
   /**
    * Constructor
@@ -128,6 +127,7 @@ export class PlanBuilder {
     this._dataset = dataset
     this._parser = new Parser(prefixes)
     this._optimizer = Optimizer.getDefault()
+    this._currentCache = null
     this._customFunctions = customFunctions
     this._stageBuilders = new Map()
 
@@ -168,6 +168,28 @@ export class PlanBuilder {
   }
 
   /**
+   * Enable Basic Graph Patterns semantic caching for SPARQL query evaluation.
+   * The parameter is optional and used to provide your own cache instance.
+   * If left undefined, the query engine will use a {@link LRUBGPCache} with
+   * a maximum of 500 items and a max age of 20 minutes.
+   * @param customCache - (optional) Custom cache instance
+   */
+  useCache (customCache?: BGPCache): void {
+    if (customCache === undefined) {
+      this._currentCache = new LRUBGPCache(500, 1200 * 60 * 60)
+    } else {
+      this._currentCache = customCache
+    }
+  }
+
+  /**
+   * Disable Basic Graph Patterns semantic caching for SPARQL query evaluation.
+   */
+  disableCache (): void {
+    this._currentCache = null
+  }
+
+  /**
    * Build the physical query execution of a SPARQL 1.1 query
    * and returns a {@link PipelineStage} or a {@link Consumable} that can be consumed to evaluate the query.
    * @param  query    - SPARQL query to evaluated
@@ -181,6 +203,7 @@ export class PlanBuilder {
     }
     if (isNull(context) || isUndefined(context)) {
       context = new ExecutionContext()
+      context.cache = this._currentCache
     }
     // Optimize the logical query execution plan
     query = this._optimizer.optimize(query)
@@ -211,7 +234,7 @@ export class PlanBuilder {
       // build pipeline starting iterator
       source = engine.of(new BindingBase())
     }
-    context.setProperty('prefixes', query.prefixes)
+    context.setProperty(ContextSymbols.PREFIXES, query.prefixes)
 
     let aggregates: any[] = []
 
@@ -238,6 +261,9 @@ export class PlanBuilder {
       return this._buildQueryPlan(construct, context, source)
     }
 
+    // from the begining, dectect any LIMIT/OFFSET modifiers, as they cimpact the caching strategy
+    context.setProperty(ContextSymbols.HAS_LIMIT_OFFSET, 'limit' in query || 'offset' in query)
+
     // Handles FROM clauses
     if (query.from) {
       context.defaultGraphs = query.from.default
@@ -246,7 +272,7 @@ export class PlanBuilder {
 
     // Handles WHERE clause
     let graphIterator: PipelineStage<Bindings>
-    if (query.where != null && query.where.length > 0) {
+    if (query.where.length > 0) {
       graphIterator = this._buildWhere(source, query.where, context)
     } else {
       graphIterator = engine.of(new BindingBase())
@@ -316,14 +342,19 @@ export class PlanBuilder {
   _buildWhere (source: PipelineStage<Bindings>, groups: Algebra.PlanNode[], context: ExecutionContext): PipelineStage<Bindings> {
     groups = sortBy(groups, g => {
       switch (g.type) {
+        case 'graph':
+          if (rdf.isVariable((g as Algebra.GraphNode).name)) {
+            return 5
+          }
+          return 0
         case 'bgp':
           return 0
         case 'values':
-          return 2
-        case 'filter':
           return 3
+        case 'filter':
+          return 4
         default:
-          return 0
+          return 1
       }
     })
 
@@ -337,7 +368,7 @@ export class PlanBuilder {
     let prec = null
     for (let i = 0; i < groups.length; i++) {
       let group = groups[i]
-      if (group.type === 'bgp' && prec != null && prec.type === 'bgp') {
+      if (group.type === 'bgp' && prec !== null && prec.type === 'bgp') {
         let lastGroup = newGroups[newGroups.length - 1] as Algebra.BGPNode
         lastGroup.triples = lastGroup.triples.concat((group as Algebra.BGPNode).triples)
       } else {
@@ -379,7 +410,7 @@ export class PlanBuilder {
         }
 
         // delegate remaining BGP evaluation to the dedicated executor
-        let iter = this._stageBuilders.get(SPARQL_OPERATION.BGP)!.execute(source, classicTriples as Algebra.TripleObject[], childContext) as PipelineStage<Bindings>
+        let iter = this._stageBuilders.get(SPARQL_OPERATION.BGP)!.execute(source, classicTriples, childContext) as PipelineStage<Bindings>
 
         // filter out variables added by the rewriting of property paths
         if (tempVariables.length > 0) {

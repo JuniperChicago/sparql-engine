@@ -10,7 +10,9 @@ An open-source framework for building SPARQL query engines in Javascript/Typescr
 * Supports [the full features of the SPARQL syntax](https://www.w3.org/TR/sparql11-query/) by *implementing a single class!*
 * Support for all [SPARQL property Paths](https://www.w3.org/TR/sparql11-query/#propertypaths).
 * Implements advanced *SPARQL query rewriting techniques* for transparently optimizing SPARQL query processing.
+* Supports [full text search queries](#full-text-search).
 * Supports [Custom SPARQL functions](#custom-functions).
+* Supports [Semantic Caching](#enable-caching), to speed up query evaluation of reccurent patterns.
 * Supports the [SPARQL UPDATE protocol](https://www.w3.org/TR/2013/REC-sparql11-update-20130321/).
 * Supports Basic [Federated SPARQL queries](https://www.w3.org/TR/2013/REC-sparql11-federated-query-20130321/) using **SERVICE clauses**.
 * Customize every step of SPARQL query processing, thanks to *a modular architecture*.
@@ -26,12 +28,15 @@ An open-source framework for building SPARQL query engines in Javascript/Typescr
   * [RDF Graphs](#rdf-graphs)
   * [RDF Datasets](#rdf-datasets)
   * [Running a SPARQL query](#running-a-sparql-query)
+* [Enable caching](#enable-caching)
+* [Full text search](#full-text-search)
 * [Federated SPARQL Queries](#federated-sparql-queries)
 * [Custom Functions](#custom-functions)
 * [Advanced Usage](#advanced-usage)
   * [Customize the pipeline implementation](#customize-the-pipeline-implementation)
   * [Customize query execution](#customize-query-execution)
 * [Documentation](#documentation)
+* [Aknowledgments](#aknowledgments)
 * [References](#references)
 
 # Installation
@@ -163,12 +168,11 @@ Finally, to run a SPARQL query on your RDF dataset, you need to use the `PlanBui
 
   // Get the name of all people in the Default Graph
   const query = `
-    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
     PREFIX foaf: <http://xmlns.com/foaf/0.1/>
     SELECT ?name
     WHERE {
       ?s a foaf:Person .
-      ?s rdfs:label ?label .
+      ?s foaf:name ?name .
     }`
 
   // Creates a plan builder for the RDF dataset
@@ -184,6 +188,76 @@ Finally, to run a SPARQL query on your RDF dataset, you need to use the `PlanBui
     () => console.log('Query evaluation complete!')
   )
 ```
+
+# Enable caching
+
+The `sparql-engine` provides support for automatic caching of Basic Graph Pattern evaluation using the [Semantic Cache algorithm](https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=1161590). Basically, the cache will save the results of BGPs already evaluated and, when the engine wants to evaluates a BGP, it will look for the largest subset of the BGP in the cache. If one is available, it will re-use the cached results to speed up query processing.
+
+By default, semantic caching is disabled. You can turn it on/off using the `PlanBuilder.useCache` and `PlanBuilder.disableCache` methods, respectively. The `useCache` method accepts an optional parameter, so you can provide your own implementation of the semantic cache. By defaults, it uses an in-memory [LRU cache](https://callidon.github.io/sparql-engine/classes/lrubgpcache.html) which stores up to 500MB of items for 20 minutes.
+
+```javascript
+// get an instance of a PlanBuilder
+const builder = new PlanBuilder(/* ... */)
+
+// activate the cache
+builder.useCache()
+
+// disable the cache
+builder.disableCache()
+```
+
+# Full Text Search
+
+The `sparql-engine` provides a non-standard full text search functionnality,
+allowing users to execute [approximate string matching](https://en.wikipedia.org/wiki/Approximate_string_matching) on RDF Terms retrieved by SPARQL queries.
+To accomplish this integration, it follows an approach similar to [BlazeGraph](https://wiki.blazegraph.com/wiki/index.php/FullTextSearch) and defines several **magic predicates** that are given special meaning, and when encountered in a SPARQL query, they are interpreted as configuration parameters for a full text search query.
+
+The simplest way to integrate a full text search into a SPARQL query is to use the magic predicate `ses:search` inside of a SPARQL join group. In the following query, this predicate is used to search for the keywords `neil` and `gaiman` in the values binded to the `?o` position of the triple pattern.
+```
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX ses: <https://callidon.github.io/sparql-engine/search#>
+SELECT * WHERE {
+  ?s foaf:knows ?o .
+  ?o ses:search “neil gaiman” .
+}
+```
+In a way, full text search queries allows users to express more complex SPARQL filters that performs approximate string matching over RDF terms.
+Each result is annotated with a *relevance score* (how much it matches the keywords, higher is better) and a *rank* (they represent the descending order of relevance scores). These two values are not binded by default into the query results, but you can use magic predicates to get access to them (see below). Note that the meaning of relevance scores is specific to the implementation of the full text search.
+
+The full list of magic predicates that you can use in a full text search query is:
+* `ses:search` defines keywords to search as a list of keywords separated by spaces.
+* `ses:matchAllTerms` indicates that only values that contain all of the specified search terms should be considered.
+* `ses:minRelevance`and `ses:maxRelevance` limits the search to matches with a minimum/maximum
+relevance score, respectively. In the default implementation, scores are floating numbers, ranging from 0.0 to 1.0 with a precision of 4 digits.
+* `ses:minRank` and `ses:maxRank` limits the search to matches with a minimum/maximum
+rank value, respectively. In the default implementation, ranks are positive integers starting at 0.
+* `ses:relevance` binds each term's relevance score to a SPARQL variable.
+* `ses:rank` binds each term's rank to a SPARQL variable.
+
+Below is a more complete example, that use most of these keywords to customize the full text search.
+```
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX ses: <https://callidon.github.io/sparql-engine/search#>
+SELECT ?s ?o ?score ?rank WHERE {
+  ?s foaf:knows ?o .
+  ?o ses:search “neil gaiman” .
+  ?o ses:minRelevance “0.25” .
+  ?o ses:maxRank “1000” .
+  ?o ses:relevance ?score .
+  ?o ses:rank ?rank .
+  ?o ses:matchAllTerms “true” .
+}
+```
+
+To provide a custom implementation for the full text search that is more integrated with your backend,
+you simply need to override the `fullTextSearch` method of the `Graph` class.
+You can find the full signature of this method in the [relevant documentation](https://callidon.github.io/sparql-engine/classes/graph.html#fullTextSearch).
+
+The `sparql-engine` framework provides a default implementation of this method, which computes relevance scores as the average ratio of keywords matched by words in the RDF terms.
+Notice that **this default implementation is not suited for production usage**.
+It will performs fine for small RDF datasets, but, 
+when possible, you should always provides a dedicated implementation that leverages your backend.
+For example, for SQL databases, you could use [GIN or GIST indexes](https://www.postgresql.org/docs/12/gin-intro.html).
 
 # Federated SPARQL Queries
 
@@ -220,33 +294,41 @@ The `sparql-engine` framework provides a supports for declaring such custom func
 
 A SPARQL value function is an extension point of the SPARQL query language that allows URI to name a function in the query processor.
 It is defined by an `IRI` in a `FILTER`, `BIND` or `HAVING BY` expression.
-To register custom functions, you must create a JSON object that maps each `IRI` to a Javascript function that takes a variable number of [RDFTerms](https://callidon.github.io/sparql-engine/interfaces/terms.rdfterm.html) arguments and returns an `RDFTerm`.
-See [the `terms` package documentation](https://callidon.github.io/sparql-engine/modules/terms.html) for more details on how to manipulate RDF terms.
+To register custom functions, you must create a JSON object that maps each function's `IRI` to a Javascript function that takes a variable number of **RDF Terms** arguments and returns one of the following:
+* A new RDF Term (an IRI, a Literal or a Blank Node) in RDF.js format.
+* An array of RDF Terms.
+* An [Iterable](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Iteration_protocols) or a [Generator](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Generator) that yields RDF Terms.
+* The `null` value, to indicates that the function's evaluation has failed.
+
+RDF Terms are represented using the [RDF.js data model](http://rdf.js.org/data-model-spec/).
+The [`rdf` subpackage](https://callidon.github.io/sparql-engine/modules/rdf.html) exposes a lot
+of utilities methods to create and manipulate RDF.js terms in the context of custom SPARQL functions.
 
 The following shows a declaration of some simple custom functions.
 ```javascript
 // load the utility functions used to manipulate RDF terms
-const { terms } = require('sparql-engine')
+const { rdf } = require('sparql-engine')
 
 // define some custom SPARQL functions
 const customFunctions = {
   // reverse a RDF literal
   'http://example.com#REVERSE': function (rdfTerm) {
     const reverseValue = rdfTerm.value.split("").reverse().join("")
-    return terms.replaceLiteralValue(rdfTerm, reverseValue)
+    return rdf.shallowCloneTerm(rdfTerm, reverseValue)
   },
-  // Test if a RDF Luteral is a palindrome
+  // Test if a RDF Literal is a palindrome
   'http://example.com#IS_PALINDROME': function (rdfTerm) {
     const result = rdfTerm.value.split("").reverse().join("") === rdfTerm.value
-    return terms.createBoolean(result)
+    return rdf.createBoolean(result)
   },
   // Test if a number is even
   'http://example.com#IS_EVEN': function (rdfTerm) {
-    if (terms.isNumber(rdfTerm)) {
-      const result = rdfTerm.value % 2 === 0
-      return terms.createBoolean(result)
+    if (rdf.termIsLiteral(rdfTerm) && rdf.literalIsNumeric(rdfTerm)) {
+      const jsValue = rdf.asJS(rdfTerm.value, rdfTerm.datatype.value)
+      const result = jsValue % 2 === 0
+      return rdf.createBoolean(result)
     }
-    return terms.createBoolean(false)
+    return terms.createFalse()
   }
 }
 ```
@@ -364,9 +446,26 @@ To generate the documentation in the `docs` director:
 ```bash
 git clone https://github.com/Callidon/sparql-engine.git
 cd sparql-engine
-npm install
+yarn install
 npm run doc
 ```
+
+# Aknowledgments
+
+This framework is developed since 2018 by many contributors, and we thanks them very much for their contributions to this project! Here is the full list of our amazing contributors.
+
+* [Corentin Marionneau](https://github.com/Slaanaroth) (@Slaanaroth)
+  * Corentin created the first version of `sparql-engine` during its research internship at the [Laboratoire des Sciences du Numérique de Nantes](https://www.ls2n.fr/) (LS2N). He is now a Web developer at SII Nantes.
+* [Merlin Barzilai](https://github.com/Rintarou) (@Rintarou)
+  * Merlin designed the first SPARQL compliance tests for the framework during its research internship at the [LS2N](https://www.ls2n.fr/).
+* [Dustin Whitney](https://github.com/dwhitney) (@dwhitney)
+  * Dustin implemented the support for custom SPARQL functions and provided a lot of feedback during the early stages of development.
+* [Julien Aimonier-Davat](https://github.com/Lastshot97) (@Lastshot97)
+  * Julien implemented the support for SPARQL Proprty Paths evaluation during its research internship at the [LS2N](https://www.ls2n.fr/).
+* [Arnaud Grall](https://github.com/folkvir) (@folkvir)
+  * Arnaud contributed to many bugfixes and provided a lot of feedback throughout the development of the framework.
+* [Thomas Minier](https://github.com/Callidon) (@Callidon)
+  * Thomas developed the framework during his PhD thesis in the [Team "Gestion des Données Distribuées"](https://sites.google.com/site/gddlina/) (GDD) and supervise its evolution ever since.
 
 # References
 

@@ -1,7 +1,7 @@
 /* file : utils.js
 MIT License
 
-Copyright (c) 2018 Thomas Minier
+Copyright (c) 2018-2020 Thomas Minier
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,13 +26,20 @@ SOFTWARE.
 
 const { Parser, Store } = require('n3')
 const fs = require('fs')
-const { HashMapDataset, Graph, PlanBuilder } = require('../dist/api.js')
-const { pick } = require('lodash')
+const { HashMapDataset, Graph, PlanBuilder, Pipeline } = require('../dist/api.js')
+const { pick, isArray } = require('lodash')
 
-function getGraph(filePath = null) {
-  const graph = new N3Graph()
-  if (filePath !== null) {
-    graph.parse(filePath)
+function getGraph(filePaths, isUnion = false) {
+  let graph
+  if (isUnion) {
+    graph = new UnionN3Graph()
+  } else {
+    graph = new N3Graph()
+  }
+  if (typeof filePaths === 'string') {
+    graph.parse(filePaths)
+  } else if (isArray(filePaths)) {
+    filePaths.forEach(filePath => graph.parse(filePath))
   }
   return graph
 }
@@ -108,11 +115,26 @@ class N3Graph extends Graph {
   }
 }
 
+class UnionN3Graph extends N3Graph {
+  constructor() {
+    super()
+  }
+
+  evalUnion (patterns, context) {
+    return Pipeline.getInstance().merge(...patterns.map(pattern => this.evalBGP(pattern, context)))
+  }
+}
+
 class TestEngine {
   constructor(graph, defaultGraphIRI = null, customOperations = {}) {
     this._graph = graph
-    this._dataset = new HashMapDataset(defaultGraphIRI, this._graph)
+    this._defaultGraphIRI = (defaultGraphIRI === null) ? this._graph.iri : defaultGraphIRI
+    this._dataset = new HashMapDataset(this._defaultGraphIRI, this._graph)
     this._builder = new PlanBuilder(this._dataset, {}, customOperations)
+  }
+
+  defaultGraphIRI() {
+    return this._defaultGraphIRI
   }
 
   addNamedGraph(iri, db) {

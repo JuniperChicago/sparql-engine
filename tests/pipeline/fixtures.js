@@ -1,7 +1,7 @@
 /* file : fixtures.js
 MIT License
 
-Copyright (c) 2019 Thomas Minier
+Copyright (c) 2018-2020 Thomas Minier
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -298,6 +298,25 @@ function testPipelineEngine (pipeline) {
     it('shoudl transform items of a PipelineStage into flattened array of items', done => {
       const out = pipeline.flatMap(pipeline.of(1, 2, 3), x => [x * 2, x * 3])
       const expected = [2, 4, 6, 3, 6, 9]
+      let cpt = 0
+      out.subscribe(x => {
+        expect(x).to.be.oneOf(expected)
+        // pull out element
+        expected.splice(expected.indexOf(x), 1)
+        cpt++
+      }, done, () => {
+        expect(cpt).to.equal(6)
+        expect(expected.length).to.equal(0)
+        done()
+      })
+    })
+  })
+
+  // flatten method
+  describe('#flattend', () => {
+    it('shoudl flatten the output of a PipelineStage that emits array of values', done => {
+      const out = pipeline.flatten(pipeline.of([1, 2], [3, 4], [5, 6]))
+      const expected = [1, 2, 3, 4, 5, 6]
       let cpt = 0
       out.subscribe(x => {
         expect(x).to.be.oneOf(expected)

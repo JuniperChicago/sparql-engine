@@ -1,7 +1,7 @@
 /* file : filter-stage-builder.ts
 MIT License
 
-Copyright (c) 2019 Thomas Minier
+Copyright (c) 2018-2020 Thomas Minier
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-
 'use strict'
 
 import StageBuilder from './stage-builder'
@@ -31,17 +30,15 @@ import sparqlFilter from '../../operators/sparql-filter'
 import { Algebra } from 'sparqljs'
 import { PipelineStage } from '../pipeline/pipeline-engine'
 import { Bindings } from '../../rdf/bindings'
-import { terms } from '../../rdf-terms'
 import ExecutionContext from '../context/execution-context'
-
-export type CustomFunctions = { [key:string]: (...args: (terms.RDFTerm | terms.RDFTerm[] | null)[]) => terms.RDFTerm }
+import { CustomFunctions } from '../../operators/expressions/sparql-expression'
 
 /**
  * A FilterStageBuilder evaluates FILTER clauses
  * @author Thomas Minier
  */
 export default class FilterStageBuilder extends StageBuilder {
-  execute(source: PipelineStage<Bindings>, filterNode: Algebra.FilterNode, customFunctions: CustomFunctions, context: ExecutionContext): PipelineStage<Bindings> {
+  execute (source: PipelineStage<Bindings>, filterNode: Algebra.FilterNode, customFunctions: CustomFunctions, context: ExecutionContext): PipelineStage<Bindings> {
     switch (filterNode.expression.operator) {
       case 'exists':
         return exists(source, filterNode.expression.args, this.builder!, false, context)

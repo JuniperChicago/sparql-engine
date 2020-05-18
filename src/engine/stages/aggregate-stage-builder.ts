@@ -1,7 +1,7 @@
 /* file : aggregate-stage-builder.ts
 MIT License
 
-Copyright (c) 2018 Thomas Minier
+Copyright (c) 2018-2020 Thomas Minier
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@ SOFTWARE.
 
 import { PipelineStage } from '../pipeline/pipeline-engine'
 import StageBuilder from './stage-builder'
-import { CustomFunctions } from '../../engine/plan-builder'
+import { CustomFunctions } from '../../operators/expressions/sparql-expression'
 import bind from '../../operators/bind'
 import filter from '../../operators/sparql-filter'
 import groupBy from '../../operators/sparql-groupby'
@@ -71,16 +71,16 @@ export default class AggregateStageBuilder extends StageBuilder {
   _executeGroupBy (source: PipelineStage<Bindings>, groupby: Algebra.Aggregation[], context: ExecutionContext, customFunctions?: CustomFunctions): PipelineStage<Bindings> {
     let iterator = source
     // extract GROUP By variables & rewrite SPARQL expressions into BIND clauses
-    const variables: string[] = []
+    const groupingVars: string[] = []
     groupby.forEach(g => {
       if (isString(g.expression)) {
-        variables.push(g.expression)
+        groupingVars.push(g.expression)
       } else {
-        variables.push(g.variable)
+        groupingVars.push(g.variable)
         iterator = bind(iterator, g.variable, g.expression, customFunctions)
       }
     })
-    return groupBy(iterator, variables)
+    return groupBy(iterator, groupingVars)
   }
 
   /**

@@ -1,7 +1,7 @@
 /* file : filter-test.js
 MIT License
 
-Copyright (c) 2018 Thomas Minier
+Copyright (c) 2018-2020 Thomas Minier
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -631,6 +631,39 @@ describe('FILTER SPARQL queries', () => {
       expectedNb: 1
     },
     {
+      name: 'replace',
+      query: `
+      PREFIX dblp-rdf: <https://dblp.uni-trier.de/rdf/schema-2017-04-18#>
+      PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+      SELECT * WHERE {
+        ?s rdf:type dblp-rdf:Person .
+        FILTER(replace("abcd", "b", "Z") = "aZcd")
+      }`,
+      expectedNb: 1
+    },
+    {
+      name: 'replace (with flags)',
+      query: `
+      PREFIX dblp-rdf: <https://dblp.uni-trier.de/rdf/schema-2017-04-18#>
+      PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+      SELECT * WHERE {
+        ?s rdf:type dblp-rdf:Person .
+        FILTER(replace("abab", "B", "Z", "i") = "aZab")
+      }`,
+      expectedNb: 1
+    },
+    {
+      name: 'replace (with complex REGEX)',
+      query: `
+      PREFIX dblp-rdf: <https://dblp.uni-trier.de/rdf/schema-2017-04-18#>
+      PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+      SELECT * WHERE {
+        ?s rdf:type dblp-rdf:Person .
+        FILTER(replace("abab", "B.", "Z","i") = "aZb")
+      }`,
+      expectedNb: 1
+    },
+    {
       name: 'abs',
       query: `
       PREFIX dblp-rdf: <https://dblp.uni-trier.de/rdf/schema-2017-04-18#>
@@ -855,6 +888,42 @@ describe('FILTER SPARQL queries', () => {
       SELECT * WHERE {
         ?s rdf:type dblp-rdf:Person .
         FILTER NOT EXISTS { ?s dblp-rdf:primaryFullPersonName "Chunck Norris" }
+      }`,
+      expectedNb: 1
+    },
+    {
+      name: 'COALESCE (value is bound)',
+      query: `
+      SELECT * WHERE {
+        BIND("Thomas" AS ?x)
+        FILTER(COALESCE(?x, "Arnaud") = "Thomas")
+      }`,
+      expectedNb: 1
+    },
+    {
+      name: 'COALESCE (value is not bound)',
+      query: `
+      SELECT * WHERE {
+        BIND("Thomas" AS ?y)
+        FILTER(COALESCE(?x, "Arnaud") = "Arnaud")
+      }`,
+      expectedNb: 1
+    },
+    {
+      name: 'IF (expression is true)',
+      query: `
+      SELECT * WHERE {
+        BIND("Thomas" AS ?x)
+        FILTER(IF(?x = "Thomas", 0, 1) = 0)
+      }`,
+      expectedNb: 1
+    },
+    {
+      name: 'IF (expression is false)',
+      query: `
+      SELECT * WHERE {
+        BIND("Arnaud" AS ?x)
+        FILTER(IF(?x = "Thomas", 0, 1) = 1)
       }`,
       expectedNb: 1
     }

@@ -1,7 +1,7 @@
 /* file : service-stage-builder.ts
 MIT License
 
-Copyright (c) 2018 Thomas Minier
+Copyright (c) 2018-2020 Thomas Minier
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@ import { Pipeline } from '../pipeline/pipeline'
 import { PipelineStage } from '../pipeline/pipeline-engine'
 import { Bindings } from '../../rdf/bindings'
 import ExecutionContext from '../context/execution-context'
+import ContextSymbols from '../context/symbols'
 
 /**
  * A ServiceStageBuilder is responsible for evaluation a SERVICE clause in a SPARQL query.
@@ -47,10 +48,10 @@ export default class ServiceStageBuilder extends StageBuilder {
   execute (source: PipelineStage<Bindings>, node: Algebra.ServiceNode, context: ExecutionContext): PipelineStage<Bindings> {
     let subquery: Algebra.RootNode
     if (node.patterns[0].type === 'query') {
-      subquery = (<Algebra.RootNode> node.patterns[0])
+      subquery = node.patterns[0] as Algebra.RootNode
     } else {
       subquery = {
-        prefixes: context.getProperty('prefixes'),
+        prefixes: context.getProperty(ContextSymbols.PREFIXES),
         queryType: 'SELECT',
         variables: ['*'],
         type: 'query',
@@ -65,10 +66,10 @@ export default class ServiceStageBuilder extends StageBuilder {
     let handler = undefined
     if (node.silent) {
       handler = () => {
-        return <PipelineStage<Bindings>> Pipeline.getInstance().empty()
+        return Pipeline.getInstance().empty<Bindings>()
       }
     }
-    return Pipeline.getInstance().catch(this._buildIterator(source, node.name, subquery, context), handler)
+    return Pipeline.getInstance().catch<Bindings, Bindings>(this._buildIterator(source, node.name, subquery, context), handler)
   }
 
   /**

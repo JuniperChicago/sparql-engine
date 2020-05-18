@@ -1,7 +1,7 @@
 /* file : aggregates-test.js
 MIT License
 
-Copyright (c) 2018 Thomas Minier
+Copyright (c) 2018-2020 Thomas Minier
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -191,7 +191,42 @@ describe('SPARQL aggregates', () => {
     })
   })
 
+  it('should evaluate aggregation queries with non-compatible UNION clauses', done => {
+    const query = `
+    SELECT ?s (COUNT(?s) AS ?nbSubjects) WHERE {
+      { ?s a ?o1 . } UNION { ?s a ?o2}
+    }
+    GROUP BY ?s
+    `
+    const results = []
+
+    const iterator = engine.execute(query)
+    iterator.subscribe(b => {
+      b = b.toObject()
+      expect(b).to.have.keys('?s', '?nbSubjects')
+      expect(b['?s']).to.equal('https://dblp.org/pers/m/Minier:Thomas')
+      expect(b['?nbSubjects']).to.equal(`"2"^^${XSD('integer')}`)
+      results.push(b)
+    }, done, () => {
+      expect(results.length).to.equal(1)
+      done()
+    })
+  })
+
   const data = [
+    {
+      name: 'COUNT-DISTINCT',
+      query: `
+      SELECT (COUNT(DISTINCT ?p) as ?count) WHERE {
+        ?s ?p ?o
+      }
+      `,
+      keys: ['?count'],
+      nbResults: 1,
+      testFun: function (b) {
+        expect(b['?count']).to.equal(`"10"^^${XSD('integer')}`)
+      }
+    },
     {
       name: 'SUM',
       query: `

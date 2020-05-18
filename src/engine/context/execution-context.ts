@@ -1,7 +1,7 @@
 /* file : execution-context.ts
 MIT License
 
-Copyright (c) 2018 Thomas Minier
+Copyright (c) 2018-2020 Thomas Minier
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,21 +25,24 @@ SOFTWARE.
 'use strict'
 
 import { QueryHints } from './query-hints'
+import { BGPCache } from '../cache/bgp-cache'
 
 /**
  * An execution context conatains control information for query execution.
  */
 export default class ExecutionContext {
-  protected _properties: Map<string, any>
+  protected _properties: Map<Symbol, any>
   protected _hints: QueryHints
   protected _defaultGraphs: string[]
   protected _namedGraphs: string[]
+  protected _cache: BGPCache | null
 
   constructor () {
     this._properties = new Map()
     this._hints = new QueryHints()
     this._defaultGraphs = []
     this._namedGraphs = []
+    this._cache = null
   }
 
   /**
@@ -91,11 +94,37 @@ export default class ExecutionContext {
   }
 
   /**
+   * Get the BGP cache currently used by the query engine.
+   * returns null if caching is disabled
+   * @return The BGP cache currently used by the query engine, or null if caching is disabled.
+   */
+  get cache (): BGPCache | null {
+    return this._cache
+  }
+
+  /**
+   * Set the BGP cache currently used by the query engine.
+   * Use null to disable caching
+   * @param newCache - The BGP cache to use for caching.
+   */
+  set cache (newCache: BGPCache | null) {
+    this._cache = newCache
+  }
+
+  /**
+   * Test the caching is enabled
+   * @return True if the caching is enabled, false otherwise
+   */
+  cachingEnabled (): boolean {
+    return this._cache !== null
+  }
+
+  /**
    * Get a property associated with a key
    * @param  key - Key associated with the property
    * @return  The value associated with the key
    */
-  getProperty (key: string): any | null {
+  getProperty (key: Symbol): any | null {
     return this._properties.get(key)
   }
 
@@ -104,7 +133,7 @@ export default class ExecutionContext {
    * @param  key - Key associated with the property
    * @return True if the context contains a property associated with the key
    */
-  hasProperty (key: string): boolean {
+  hasProperty (key: Symbol): boolean {
     return this._properties.has(key)
   }
 
@@ -113,7 +142,7 @@ export default class ExecutionContext {
    * @param key - Key of the property
    * @param value - Value of the property
    */
-  setProperty (key: string, value: any): void {
+  setProperty (key: Symbol, value: any): void {
     this._properties.set(key, value)
   }
 
@@ -121,12 +150,13 @@ export default class ExecutionContext {
    * Clone the execution context
    * @return A clone of the execution context
    */
-  clone () : ExecutionContext {
+  clone (): ExecutionContext {
     const res = new ExecutionContext()
     this._properties.forEach((value, key) => res.setProperty(key, value))
     res._hints = this.hints.clone()
     res._defaultGraphs = this._defaultGraphs.slice(0)
     res._namedGraphs = this._namedGraphs.slice(0)
+    res._cache = this._cache
     return res
   }
 
